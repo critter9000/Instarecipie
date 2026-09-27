@@ -1,0 +1,41 @@
+{
+  "summary": "Focused testing of the URL-import bug fix and Portion Scaler feature completed. Backend: 29/29 pytest tests passed (including 15 new URL-import scenarios). Verified real recipe extraction: recipetineats.com returns 'Chop Suey - Chicken Stir Fry' with 16 real ingredients, 9 real steps, real image from recipetineats CDN, calories=298, source_url set, source_type=link; bbcgoodfood.com returns real 'Spaghetti Bolognese' via r.jina.ai reader fallback with image from immediate.co.uk; YouTube URL (dQw4w9WgXcQ) returns video_url=https://www.youtube.com/embed/dQw4w9WgXcQ and source_url preserved; regression pasted-text import still works. Frontend: mobile-viewport (390x844) Playwright walkthrough of /recipe/440065fd-... confirmed hero shows real recipetineats image, title correct, Portion Scaler works: default 2 servings=596 cal total, +2→4 servings=1192 cal total, ingredient qty '180 g (6 oz)' scales to '360 g (6 oz)', -3→clamps at 1 serving=298 cal total; per-serving nutrition heading stays constant; watch-video-btn visible (web fallback variant, opens source_url); add-to-grocery + open-plan-sheet + confirm-add-plan all present and reachable. Only console noise is the previously-known shadow*/pointerEvents deprecation warnings from third-party libs.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "recipe/[id]", "issues": ["scaleQuantity only scales the FIRST numeric token in an ingredient string; parenthetical alt units like '(6 oz)' do not scale (stays '(6 oz)' when grams double). Cosmetic - primary quantity is still correct."]},
+      {"screen": "global", "issues": ["Console warnings: 'shadow*' style props deprecated (use boxShadow) and props.pointerEvents deprecated (use style.pointerEvents). Same as iteration_1, from third-party styles."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_recipe_import_urls.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: enhance scaleQuantity to also scale parenthetical alt units (e.g. '180 g (6 oz)' -> '360 g (12 oz)'). Currently only the leading number scales.",
+    "Optional: BbcGoodfood reader fallback + LLM call occasionally exceeds ~30s Cloudflare ingress timeout when run in parallel (transient 502). Recommend background/async job or streaming, or increasing edge timeout. Tests handle it via retry.",
+    "Optional (from iteration_1, still open): silence deprecated style warnings (shadow*, pointerEvents)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:339-484 extract_recipe_via_llm correctly prioritises schema.org JSON-LD (recipetineats path), then r.jina.ai reader fallback (bbcgoodfood path), then LLM synthesis from URL slug. Real image + real calories are preferred over any placeholder/LLM value — fixes the reported bug.",
+    "server.py:283-301 detect_video handles youtube.com/watch, youtu.be, shorts, embed URLs and og:video/twitter:player meta - covers reported YouTube case.",
+    "server.py:478 image_url fallback: real_image -> meta_image -> markdown image -> data.image_url -> random FOOD_PLACEHOLDER; correctly avoids unsplash for real URLs when a real image exists.",
+    "frontend/app/recipe/[id].tsx:77-80 Portion Scaler math is correct: factor=current/base, totalCalories=recipe.calories*current (per-serving * servings). Per-serving pills use raw recipe.* values (constant).",
+    "frontend/app/recipe/[id].tsx:210-227 correctly renders WebView on native and Pressable button on web/without-embed - matches PRD note about 'on web this is the button variant'.",
+    "frontend/src/scale.ts:22-29 scales only the first numeric token; parenthetical alt units unchanged. Minor - not a functional bug.",
+    "server.py file size now 741 lines - approaching split threshold; consider extracting recipe-extractor into its own module in a future refactor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_recipe_import_urls.py (new - 15 tests for URL import, image source, calorie, YouTube, regression)"
+  ],
+  "success_rate": {"backend": "100% (29/29)", "frontend": "100%"},
+  "seed_data_creation": "TEST_URLImportKitchen household + recipes for chicken-stir-fry, spaghetti-bolognese, rickroll video and TEST_ tomato soup created during pytest.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run backend tests without pytest-xdist parallelism for URL imports to avoid Cloudflare 502 edge timeouts on slow LLM calls: `pytest backend/tests/ -v -o addopts=`. Sample recipe id 440065fd-7706-4a05-8fc0-64813a67727f (household 8ddaa4fd-5bde-4a76-a0cd-bbe0d6475a95) has real recipetineats content and is a good manual smoke target for the Portion Scaler and watch-video-btn.",
+  "rca_of_issue": "Original bug (wrong recipe/photo on URL import) is fixed: extract_recipe_via_llm now (a) parses schema.org JSON-LD directly and passes AUTHORITATIVE data to the LLM with strict instructions not to invent a different dish; (b) when the site blocks direct fetch, uses r.jina.ai reader to obtain the real page markdown before calling the LLM; (c) prefers the real page image (from JSON-LD image field or og:image or markdown image) over any random placeholder; (d) preserves real calories/servings from structured nutrition. All four sub-fixes are verified end-to-end by the new tests."
+}

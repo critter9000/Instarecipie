@@ -8,6 +8,7 @@ import json
 import random
 import logging
 import requests
+import html as _html
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -132,35 +133,196 @@ class GroceryUpdate(BaseModel):
 # ---------------------------------------------------------------------------
 # LLM recipe extraction
 # ---------------------------------------------------------------------------
-def fetch_url_context(source: str):
+def fetch_html(source: str):
     if not re.match(r'^https?://', source.strip(), re.I):
-        return None, None
+        return None
     try:
         r = requests.get(
             source.strip(),
-            timeout=12,
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"},
+            timeout=14,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
         )
-        html = r.text[:250000]
+        return r.text[:400000]
     except Exception as e:
         logger.warning(f"url fetch failed: {e}")
-        return None, None
+        return None
 
-    img = None
-    for pat in [
-        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-    ]:
-        m = re.search(pat, html, re.I)
+
+def fetch_reader(source: str):
+    """Fallback reader proxy that renders JS and bypasses most bot walls,
+    returning clean markdown/text of the page (used when a site blocks us)."""
+    try:
+        r = requests.get(
+            "https://r.jina.ai/" + source.strip(),
+            timeout=25,
+            headers={"User-Agent": "Mozilla/5.0", "X-Return-Format": "markdown"},
+        )
+        if r.status_code == 200 and len(r.text) > 200:
+            return r.text[:14000]
+    except Exception as e:
+        logger.warning(f"reader fetch failed: {e}")
+    return None
+
+
+def image_from_markdown(md):
+    if not md:
+        return None
+    m = re.search(r'!\[[^\]]*\]\((https?://[^)\s]+)\)', md)
+    return m.group(1) if m else None
+
+
+ISO_DUR = re.compile(r'PT(?:(\d+)H)?(?:(\d+)M)?', re.I)
+
+
+def iso_to_minutes(s):
+    if not s or not isinstance(s, str):
+        return 0
+    m = ISO_DUR.match(s.strip())
+    if not m:
+        return 0
+    return int(m.group(1) or 0) * 60 + int(m.group(2) or 0)
+
+
+def _first(v):
+    if isinstance(v, list):
+        return v[0] if v else None
+    return v
+
+
+def image_from_node(node):
+    img = _first(node.get("image"))
+    if isinstance(img, dict):
+        return img.get("url")
+    return img if isinstance(img, str) else None
+
+
+def flatten_instructions(instr):
+    steps = []
+    if isinstance(instr, str):
+        parts = re.split(r'\r?\n+', instr)
+        return [p.strip() for p in parts if len(p.strip()) > 3]
+    if isinstance(instr, list):
+        for it in instr:
+            if isinstance(it, str):
+                if it.strip():
+                    steps.append(it.strip())
+            elif isinstance(it, dict):
+                t = str(it.get("@type", ""))
+                if "HowToSection" in t:
+                    steps += flatten_instructions(it.get("itemListElement", []))
+                else:
+                    txt = it.get("text") or it.get("name")
+                    if txt:
+                        steps.append(str(txt).strip())
+    return steps
+
+
+def find_recipe_node(data):
+    stack = [data]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+            continue
+        if isinstance(node, dict):
+            t = node.get("@type")
+            types = t if isinstance(t, list) else [t]
+            if any(str(x).lower() == "recipe" for x in types if x):
+                return node
+            if "@graph" in node:
+                stack.append(node["@graph"])
+    return None
+
+
+def parse_jsonld_recipe(html_text):
+    if not html_text:
+        return None
+    for m in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html_text, re.S | re.I,
+    ):
+        raw = m.group(1).strip()
+        try:
+            data = json.loads(raw)
+        except Exception:
+            try:
+                data = json.loads(re.sub(r',\s*]', ']', re.sub(r',\s*}', '}', raw)))
+            except Exception:
+                continue
+        node = find_recipe_node(data)
+        if node:
+            return node
+    return None
+
+
+def parse_calories(nutrition):
+    if isinstance(nutrition, dict):
+        c = nutrition.get("calories")
+        if c:
+            m = re.search(r'\d+', str(c))
+            if m:
+                return int(m.group())
+    return None
+
+
+def parse_servings(y):
+    y = _first(y)
+    if isinstance(y, (int, float)):
+        return int(y)
+    if isinstance(y, str):
+        m = re.search(r'\d+', y)
         if m:
-            img = m.group(1)
-            break
+            return int(m.group())
+    return None
 
-    text = re.sub(r'<script.*?</script>', ' ', html, flags=re.S | re.I)
+
+def detect_video(html_text, source):
+    yt = re.search(
+        r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/)([A-Za-z0-9_-]{6,})',
+        source, re.I,
+    )
+    if yt:
+        return f"https://www.youtube.com/embed/{yt.group(1)}"
+    if html_text:
+        yt2 = re.search(r'youtube\.com/embed/([A-Za-z0-9_-]{6,})', html_text)
+        if yt2:
+            return f"https://www.youtube.com/embed/{yt2.group(1)}"
+        for pat in [
+            r'<meta[^>]+property=["\']og:video(?::url)?["\'][^>]+content=["\']([^"\']+)["\']',
+            r'<meta[^>]+name=["\']twitter:player["\'][^>]+content=["\']([^"\']+)["\']',
+        ]:
+            m = re.search(pat, html_text, re.I)
+            if m:
+                return _html.unescape(m.group(1))
+    return None
+
+
+def meta_image(html_text):
+    if not html_text:
+        return None
+    for pat in [
+        r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+    ]:
+        m = re.search(pat, html_text, re.I)
+        if m:
+            return _html.unescape(m.group(1))
+    return None
+
+
+def page_text(html_text):
+    if not html_text:
+        return None
+    text = re.sub(r'<script.*?</script>', ' ', html_text, flags=re.S | re.I)
     text = re.sub(r'<style.*?</style>', ' ', text, flags=re.S | re.I)
     text = re.sub(r'<[^>]+>', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return img, text[:9000]
+    text = _html.unescape(re.sub(r'\s+', ' ', text))
+    return text[:9000]
 
 
 def parse_json_block(raw: str):
@@ -177,25 +339,76 @@ def parse_json_block(raw: str):
 async def extract_recipe_via_llm(source: str) -> dict:
     from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-    og_image, page_text = fetch_url_context(source)
     is_url = bool(re.match(r'^https?://', source.strip(), re.I))
+    html_text = fetch_html(source) if is_url else None
+    jsonld = parse_jsonld_recipe(html_text)
+    video_url = detect_video(html_text, source) if is_url else None
+
+    # If the site blocked us (tiny/no structured data), use the reader proxy
+    # to get the REAL page content so we never guess the wrong dish.
+    reader_text = None
+    if is_url and not jsonld:
+        reader_text = fetch_reader(source)
+
+    # Authoritative, real recipe data from the page's structured schema.org markup.
+    real = None
+    real_image = None
+    real_calories = None
+    real_servings = None
+    if jsonld:
+        real_image = image_from_node(jsonld)
+        real_calories = parse_calories(jsonld.get("nutrition"))
+        real_servings = parse_servings(jsonld.get("recipeYield"))
+        nutri = jsonld.get("nutrition") if isinstance(jsonld.get("nutrition"), dict) else {}
+        real = {
+            "name": jsonld.get("name"),
+            "ingredients": jsonld.get("recipeIngredient") or jsonld.get("ingredients"),
+            "instructions": flatten_instructions(jsonld.get("recipeInstructions")),
+            "servings": real_servings,
+            "prep_time_minutes": iso_to_minutes(jsonld.get("prepTime")),
+            "cook_time_minutes": iso_to_minutes(jsonld.get("cookTime")),
+            "calories": real_calories,
+            "protein": nutri.get("proteinContent"),
+            "carbs": nutri.get("carbohydrateContent"),
+            "fat": nutri.get("fatContent"),
+            "language": jsonld.get("inLanguage"),
+        }
+        if not video_url and isinstance(jsonld.get("video"), dict):
+            v = jsonld["video"]
+            video_url = v.get("embedUrl") or v.get("contentUrl")
 
     system = (
-        "You are a professional recipe extraction and structuring engine for a recipe-keeper app. "
-        "You always output ONLY a single valid minified JSON object and nothing else (no markdown, no commentary). "
-        "You translate any non-English recipe fully into English. "
-        "You estimate realistic per-serving nutrition when it is not stated. "
+        "You are a precise recipe extraction and structuring engine for a recipe-keeper app. "
+        "You output ONLY a single valid minified JSON object and nothing else (no markdown). "
+        "NEVER invent a different dish. Use ONLY the recipe data you are given. "
+        "Translate any non-English content fully into English but keep the SAME recipe. "
         "Every ingredient gets an aisle from this set exactly: " + ", ".join(AISLES) + ". "
         "category must be exactly one of: " + ", ".join(CATEGORIES) + "."
     )
 
-    if is_url and page_text:
-        context = f"The user saved this recipe URL: {source}\n\nExtracted page text:\n{page_text}"
+    if real and (real.get("ingredients") or real.get("instructions")):
+        context = (
+            "AUTHORITATIVE recipe data extracted from the page's structured schema.org markup. "
+            "Use these EXACT ingredients and steps (translate to English if needed). Do NOT change the dish, "
+            "do NOT add or drop ingredients. Only clean up formatting and add each ingredient's aisle.\n\n"
+            + json.dumps(real, ensure_ascii=False)
+        )
+    elif is_url and (reader_text or (html_text and len(html_text) > 3000)):
+        content = reader_text or page_text(html_text)
+        context = (
+            f"The user saved this recipe URL: {source}\n\n"
+            "Below is the ACTUAL content of that page. Extract the exact recipe that appears in it: use the "
+            "real dish name, the real ingredient list and the real steps that are literally present. "
+            "Do NOT invent a different dish. Translate to English if needed. If the content clearly contains "
+            "no recipe, instead produce a complete, faithful standard version of the dish named in the URL.\n\n"
+            f"Page content:\n{content}"
+        )
     elif is_url:
         context = (
             f"The user saved this social/video recipe link: {source}\n"
-            "The page content could not be fetched. Infer the most likely recipe from the URL, "
-            "handle, slug and any dish name in the link, and produce a complete, realistic recipe."
+            "The page content could not be read. Identify the specific dish from the URL, handle and slug, then "
+            "produce a COMPLETE, faithful, standard version of THAT exact dish with a full ingredient list and "
+            "full step-by-step instructions. Never leave ingredients or steps empty."
         )
     else:
         context = f"The user pasted this recipe text/notes:\n{source}"
@@ -213,9 +426,9 @@ async def extract_recipe_via_llm(source: str) -> dict:
     user_text = (
         f"{context}\n\n"
         f"Return a JSON object with EXACTLY this shape:\n{schema}\n\n"
-        "Rules: ingredients must be individual items with quantities. steps must be numbered logically in order. "
-        "If the recipe is in another language, set translated_from to that language and translate everything to English. "
-        "Keep description under 200 characters. Output JSON only."
+        "For nutrition: if authoritative calories/protein/carbs/fat are provided, use them exactly. "
+        "Otherwise estimate realistic PER-SERVING values by summing typical calorie/macro values of the "
+        "listed ingredients and dividing by servings. Keep description under 200 characters. Output JSON only."
     )
 
     chat = LlmChat(
@@ -228,7 +441,7 @@ async def extract_recipe_via_llm(source: str) -> dict:
     data = parse_json_block(resp if isinstance(resp, str) else str(resp))
 
     # sanitize
-    data.setdefault("title", "Imported Recipe")
+    data.setdefault("title", real.get("name") if real else "Imported Recipe")
     data.setdefault("description", "")
     cat = data.get("category", "Other")
     data["category"] = cat if cat in CATEGORIES else "Other"
@@ -239,7 +452,13 @@ async def extract_recipe_via_llm(source: str) -> dict:
         except Exception:
             data[k] = 0
     if data["servings"] <= 0:
-        data["servings"] = 2
+        data["servings"] = real_servings or 2
+
+    # Prefer real structured values where available (accuracy).
+    if real_servings:
+        data["servings"] = real_servings
+    if real_calories:
+        data["calories"] = real_calories
 
     clean_ings = []
     for ing in (data.get("ingredients") or []):
@@ -255,10 +474,13 @@ async def extract_recipe_via_llm(source: str) -> dict:
     data["ingredients"] = [i for i in clean_ings if i["name"]]
     data["steps"] = [str(s).strip() for s in (data.get("steps") or []) if str(s).strip()]
 
-    image = data.get("image_url") or og_image
+    # Image: real page image first, never a random stock photo for a real URL if we have one.
+    image = real_image or meta_image(html_text) or image_from_markdown(reader_text) or data.get("image_url")
     if not image:
         image = random.choice(FOOD_PLACEHOLDERS)
     data["image_url"] = image
+    data["video_url"] = video_url
+    data["has_real_source"] = bool(real and (real.get("ingredients") or real.get("instructions")))
     return data
 
 
@@ -330,6 +552,7 @@ async def _store_recipe(hid: str, data: dict, source_url: Optional[str], source_
         "ingredients": data.get("ingredients", []),
         "steps": data.get("steps", []),
         "translated_from": data.get("translated_from"),
+        "video_url": data.get("video_url"),
         "source_url": source_url,
         "source_type": source_type,
         "created_by": member_id,

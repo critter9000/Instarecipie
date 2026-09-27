@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +12,8 @@ import {
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
+import { WebView } from "react-native-webview";
+import * as WebBrowser from "expo-web-browser";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -30,6 +34,7 @@ import {
 import { RECIPE_PLACEHOLDER } from "@/src/assets";
 import { useToast } from "@/src/components/Toast";
 import { useHouseholdCtx } from "@/src/household-context";
+import { scaleQuantity } from "@/src/scale";
 import { fonts, makeStyles, radius, spacing, useTheme } from "@/src/theme";
 
 const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
@@ -49,6 +54,7 @@ export default function RecipeDetail() {
   const deleteRecipe = useDeleteRecipe(householdId ?? undefined);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
+  const [servings, setServings] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState(dayjs().format("YYYY-MM-DD"));
   const [selectedMeal, setSelectedMeal] = useState("Dinner");
 
@@ -67,6 +73,22 @@ export default function RecipeDetail() {
   }
 
   const totalTime = recipe.prep_time_minutes + recipe.cook_time_minutes;
+
+  const baseServings = Math.max(recipe.servings || 1, 1);
+  const currentServings = servings ?? baseServings;
+  const factor = currentServings / baseServings;
+  const totalCalories = Math.round(recipe.calories * currentServings);
+
+  const openVideo = async () => {
+    const url = recipe.video_url || recipe.source_url;
+    if (!url) return;
+    try {
+      await WebBrowser.openBrowserAsync(url);
+    } catch {
+      Linking.openURL(url);
+    }
+  };
+  const isYouTubeEmbed = !!recipe.video_url && recipe.video_url.includes("youtube.com/embed");
 
   const handleAddGrocery = async () => {
     try {
@@ -160,20 +182,68 @@ export default function RecipeDetail() {
                 <Text style={styles.metaText}>{totalTime} min</Text>
               </View>
             )}
-            <View style={styles.metaItem}>
-              <Icon name="users" size={16} color={colors.brandPrimary} />
-              <Text style={styles.metaText}>{recipe.servings} servings</Text>
+            <View style={styles.servingsStepper}>
+              <Pressable
+                testID="servings-minus"
+                hitSlop={8}
+                onPress={() => setServings(Math.max(1, currentServings - 1))}
+                style={styles.stepBtn}
+              >
+                <Icon name="minus" size={16} color={colors.onSurfaceTertiary} />
+              </Pressable>
+              <Text style={styles.servingsText} testID="servings-value">
+                {currentServings} {currentServings === 1 ? "serving" : "servings"}
+              </Text>
+              <Pressable
+                testID="servings-plus"
+                hitSlop={8}
+                onPress={() => setServings(currentServings + 1)}
+                style={styles.stepBtn}
+              >
+                <Icon name="plus" size={16} color={colors.onSurfaceTertiary} />
+              </Pressable>
             </View>
           </View>
 
+          {(recipe.video_url || recipe.source_url) && (
+            <View>
+              {isYouTubeEmbed && Platform.OS !== "web" ? (
+                <View style={styles.videoWrap}>
+                  <WebView
+                    testID="recipe-video"
+                    source={{ uri: recipe.video_url! }}
+                    style={styles.video}
+                    allowsFullscreenVideo
+                    javaScriptEnabled
+                  />
+                </View>
+              ) : (
+                <Pressable testID="watch-video-btn" onPress={openVideo} style={styles.videoBtn}>
+                  <Icon name="play-circle" size={20} color={colors.brandPrimary} />
+                  <Text style={styles.videoBtnText}>Watch the original video</Text>
+                  <Icon name="external-link" size={16} color={colors.muted} />
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {/* Nutrition */}
-          <View style={styles.nutritionRow}>
-            {nutrition.map((n) => (
-              <View key={n.label} style={styles.nutriPill}>
-                <Text style={styles.nutriValue}>{n.value}</Text>
-                <Text style={styles.nutriLabel}>{n.label}</Text>
-              </View>
-            ))}
+          <View>
+            <Text style={styles.nutriHeading}>Nutrition · per serving</Text>
+            <View style={styles.nutritionRow}>
+              {nutrition.map((n) => (
+                <View key={n.label} style={styles.nutriPill}>
+                  <Text style={styles.nutriValue}>{n.value}</Text>
+                  <Text style={styles.nutriLabel}>{n.label}</Text>
+                </View>
+              ))}
+            </View>
+            {recipe.calories > 0 && (
+              <Text style={styles.totalCal} testID="total-calories">
+                ≈ {totalCalories} cal total for {currentServings}{" "}
+                {currentServings === 1 ? "serving" : "servings"}
+              </Text>
+            )}
           </View>
 
           {/* Segmented control */}
@@ -200,7 +270,11 @@ export default function RecipeDetail() {
                 <View key={i} style={styles.ingredientRow}>
                   <View style={styles.dot} />
                   <Text style={styles.ingredientName}>{ing.name}</Text>
-                  {!!ing.quantity && <Text style={styles.ingredientQty}>{ing.quantity}</Text>}
+                  {!!ing.quantity && (
+                    <Text style={styles.ingredientQty}>
+                      {scaleQuantity(ing.quantity, factor)}
+                    </Text>
+                  )}
                 </View>
               ))}
             </View>
@@ -353,10 +427,69 @@ const useStyles = makeStyles((colors) => ({
   translatedText: { fontFamily: fonts.text.medium, fontSize: 11, color: colors.onInfo },
   title: { fontFamily: fonts.display.bold, fontSize: 28, color: colors.onSurface, lineHeight: 34 },
   description: { fontFamily: fonts.text.regular, fontSize: 15, color: colors.muted, lineHeight: 22 },
-  metaRow: { flexDirection: "row", gap: spacing.xl, marginTop: spacing.xs },
+  metaRow: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.xs, alignItems: "center", flexWrap: "wrap" },
   metaItem: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   metaText: { fontFamily: fonts.text.semibold, fontSize: 14, color: colors.onSurfaceTertiary },
-  nutritionRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  servingsStepper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.surfaceTertiary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  stepBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  servingsText: {
+    fontFamily: fonts.text.semibold,
+    fontSize: 14,
+    color: colors.onSurface,
+    minWidth: 78,
+    textAlign: "center",
+  },
+  videoWrap: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    backgroundColor: "#000000",
+  },
+  video: { flex: 1, backgroundColor: "#000000" },
+  videoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.brandTertiary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    height: 50,
+  },
+  videoBtnText: {
+    flex: 1,
+    fontFamily: fonts.text.semibold,
+    fontSize: 15,
+    color: colors.onBrandTertiary,
+  },
+  nutriHeading: {
+    fontFamily: fonts.text.semibold,
+    fontSize: 13,
+    color: colors.muted,
+    marginBottom: spacing.sm,
+  },
+  nutritionRow: { flexDirection: "row", gap: spacing.sm },
+  totalCal: {
+    fontFamily: fonts.text.medium,
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: spacing.sm,
+  },
   nutriPill: {
     flex: 1,
     backgroundColor: colors.surfaceTertiary,

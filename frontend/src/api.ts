@@ -29,6 +29,7 @@ export type Recipe = {
   ingredients: Ingredient[];
   steps: string[];
   translated_from: string | null;
+  video_url: string | null;
   source_url: string | null;
   source_type: string;
   created_by: string | null;
