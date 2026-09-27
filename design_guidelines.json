@@ -1,0 +1,161 @@
+{
+  "app_name": "All My Meals",
+  "personality": "1 iOS-Native Clean with Editorial Mobile twist (Serif headings)",
+  "personality_one_liner": "A clean, appetizing, and highly organized digital cookbook where the food is the hero, accented by a warm, approachable culinary mascot.",
+  "color": {
+    "surface": "#FDFBF7",
+    "onSurface": "#1C1917",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1917",
+    "surfaceTertiary": "#F5F2EB",
+    "onSurfaceTertiary": "#44403C",
+    "surfaceInverse": "#292524",
+    "onSurfaceInverse": "#FAFAF9",
+    "brand": "#D35400",
+    "brandPrimary": "#C84C31",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#F2E2DC",
+    "onBrandSecondary": "#8A311D",
+    "brandTertiary": "#F9EBE7",
+    "onBrandTertiary": "#6B2313",
+    "success": "#E9F2EC",
+    "onSuccess": "#2A5A39",
+    "warning": "#FDF3E1",
+    "onWarning": "#7D5513",
+    "error": "#FCEBEA",
+    "onError": "#942721",
+    "info": "#EBECE8",
+    "onInfo": "#3B3D36",
+    "border": "#E8E4DF",
+    "borderStrong": "#D6D0C4",
+    "divider": "#F0ECE6",
+    "muted": "#78716C",
+    "onBrand": "#FFFFFF"
+  },
+  "typography": {
+    "displayFontFamily": "Lora",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous vertical breathing room for content. Use intentional padding to frame recipes. Thumb-zone access for primary actions.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 1,
+  "navigation": "bottom_tabs",
+  "icon_set": "Feather",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use glass on bottom tab bar to allow scrolling content to bleed beneath.",
+      "Use glass on floating contextual action bars (e.g., 'Add to Plan' button on Recipe Detail).",
+      "Apply to sticky headers on Recipe Detail scrolling screens."
+    ],
+    "dont's": [
+      "Never use glass on forms or body text regions.",
+      "Never use glass without a >70% translucent tinted base for readability."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home (Library)",
+      "purpose": "A visually appetizing grid of saved recipes with a prominent, easy-to-use 'Import Link' action.",
+      "states": {
+        "loading": "Skeleton grids representing recipe cards.",
+        "empty": "Mascot illustration looking eager with 'Paste a recipe link to start your cookbook!' and a large primary CTA.",
+        "error": "Mascot looking confused, readable error message, and a Retry button."
+      },
+      "layout": "Sticky header with 'Import Recipe' input field or button. Horizontal scroll for Categories (Dinner, Vegan, 15-min). 2-column grid for recipe cards. Cards have full-bleed images at the top, a subtle gradient scrim if text overlays, or crisp text below the image."
+    },
+    {
+      "name": "Recipe Detail",
+      "purpose": "Immersive cooking and reading experience for a specific recipe.",
+      "states": {
+        "loading": "Full screen skeleton with hero image placeholder.",
+        "empty": "N/A - Screen only accessed if recipe exists.",
+        "error": "Error fetching recipe details, 'Retry' CTA."
+      },
+      "layout": "Large hero image bleeding to the top edge. Gradient scrim (transparent to surfaceInverse) at bottom of image if back/action buttons overlay it. Content split into 'Ingredients' and 'Steps' via segmented control. Sticky action bar at the bottom to 'Add to Meal Plan' or 'Add to Grocery List'."
+    },
+    {
+      "name": "Meal Planner",
+      "purpose": "Organize recipes into a weekly schedule with drag/drop or tap-to-assign flow.",
+      "states": {
+        "loading": "Skeleton of weekly calendar view.",
+        "empty": "Mascot holding an empty plate saying 'Your week is looking hungry! Add recipes to plan meals.'",
+        "error": "Failed to sync meal plan, 'Retry' CTA."
+      },
+      "layout": "Horizontal date selector at the top. Vertical list of meals for the selected day. Empty slots have dashed borders (surfaceTertiary) with a '+' icon. Filled slots show a condensed horizontal recipe card with an image thumbnail."
+    },
+    {
+      "name": "Grocery List",
+      "purpose": "Shared shopping list automatically categorized by grocery aisles.",
+      "states": {
+        "loading": "Skeleton list items.",
+        "empty": "Mascot with a shopping basket saying 'All stocked up! Add ingredients from your meal plan.'",
+        "error": "Failed to sync shared list, 'Retry' CTA."
+      },
+      "layout": "Header shows avatars of household members. List is grouped by category (Produce, Dairy, Pantry). Items have checkboxes. Tapping an item strikes it out and moves it to a collapsed 'Completed' section at the bottom."
+    }
+  ],
+  "images": {
+    "onboarding_mascot": {
+      "url": "https://images.unsplash.com/photo-1741963347862-51f35201a4f0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwyfHxjdXRlJTIwM2QlMjBjaGVmJTIwbWFzY290JTIwY2hhcmFjdGVyfGVufDB8fHx8MTc5MDUwOTYzMnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Cute 3D chef mascot character holding a cake cutout"
+    },
+    "recipe_placeholder_1": {
+      "url": "https://images.unsplash.com/photo-1490645935967-10de6ba17061?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTZ8MHwxfHNlYXJjaHwxfHxkZWxpY2lvdXMlMjBoZWFsdGh5JTIwbWVhbCUyMG92ZXJoZWFkfGVufDB8fHx8MTc5MDUwOTYzMnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Delicious healthy meal overhead on a blue plate"
+    },
+    "empty_grocery_basket": {
+      "url": "https://images.unsplash.com/photo-1631021967261-c57ee4dfa9bb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2Mzl8MHwxfHNlYXJjaHwyfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBzaG9wcGluZyUyMGJhc2tldHxlbnwwfHx8fDE3OTA1MDk2MzJ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Fresh vegetables in a woven shopping basket"
+    }
+  },
+  "haptics": {
+    "recipe_import_success": "notificationSuccess",
+    "add_to_grocery": "impactLight",
+    "check_grocery_item": "impactMedium",
+    "tab_switch": "selection",
+    "primary_button_press": "impactLight"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette. Do NOT use any blues or purples for buttons, links, or statuses. Use Terracotta (brandPrimary) for primary actions.",
+    "Typography: Use 'Lora' (Serif) ONLY for large Display/Headlines (e.g., Recipe Titles, Screen Headers). Use 'Plus Jakarta Sans' for all other UI elements, body text, tags, and inputs. Cap font weight at 500.",
+    "Use the Mascot ('onboarding_mascot' image) predominantly in Empty States across Home, Meal Planner, and Grocery List to inject personality, as requested by the user.",
+    "Recipe Detail Screen: Implement a gradient-to-dark scrim (top-to-bottom, 3-stop fade ending in >=70% surfaceInverse) over the hero image if there are overlaying UI elements or text.",
+    "Grocery List: Group items by category. Display small avatar initials (or icons) next to items if they were added by a household member.",
+    "Spacing: Apply layout patterns strictly. Do not leave 'orphan' cards in grid layouts. A 2-column grid should use flexWrap with space-between.",
+    "Primary CTAs ('Add to Plan', 'Import Recipe') should sit in a safe-area anchored bottom container (using glassmorphism) if over scrolling content."
+  ]
+}
