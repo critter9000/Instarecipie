@@ -101,3 +101,56 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "The recipient don’t have a Foto from the respective videos. User confirmed: fix photos for existing and new recipes. Example https://www.youtube.com/shorts/ysaHg7qzoK0"
+backend:
+  - task: "Original-source photos for new and existing recipes"
+    implemented: true
+    working: true
+    file: "backend/recipe_photos.py, backend/photo_jobs.py, backend/object_storage.py, backend/server.py"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: user
+        comment: "Saved recipes lack photos from the respective source videos."
+      - working: NA
+        agent: main
+        comment: "Replaced stock/reader-first-image fallback with exact YouTube video ID and verified metadata images. Managed storage integration working, migration has repaired 11 source images including existing user's caramelized onion chicken pasta Short. New imports resolve photos asynchronously; explicit refresh endpoint; no recipe text changed during migration."
+      - working: true
+        agent: testing
+        comment: "17/17 targeted backend tests passed: exact user Short import, stored JPEG, refresh revision, ownership/deletion checks, migration invariants and parser edge cases. See iteration_3.json."
+frontend:
+  - task: "Source photos in cookbook, details and planner with honest fallback and refresh"
+    implemented: true
+    working: true
+    file: "frontend/src/components/SourcePhoto.tsx, frontend/src/components/RecipeCard.tsx, frontend/app/recipe/[id].tsx, frontend/app/(tabs)/planner.tsx, frontend/src/api.ts"
+    stuck_count: 0
+    priority: high
+    needs_retesting: false
+    status_history:
+      - working: NA
+        agent: main
+        comment: "Shared image component with load/error states and managed-image URL resolution, recipe photo status and refresh action, pending-photo polling. No stock fallbacks."
+      - working: true
+        agent: testing
+        comment: "Mobile preview library/detail/planner/refresh/fallback and scaler/grocery regression verified. Main also visually confirmed exact user Short original thumbnail. No photo-flow bugs. Existing third-party deprecation warnings remain non-blocking."
+metadata:
+  created_by: main_agent
+  version: '3.0'
+  test_sequence: 3
+  run_ui: true
+test_plan:
+  current_focus:
+    - "Exact user YouTube Short thumbnail, stored binary and fresh import"
+    - "Existing recipe repaired without changing ingredients/steps; idempotent migration"
+    - "Recipe photos render in library/details/planner, refresh updates queries"
+    - "Unavailable images show neutral state; invalid image bytes and wrong household rejected"
+  stuck_tasks: []
+  test_all: false
+  test_priority: high_first
+  completed: true
+agent_communication:
+  - agent: main
+    message: "Use current frontend .env preview URL. Sample legacy repaired recipe 61624a40-29d1-477a-bb01-229dc524e82a is in household c71d39fb-00b0-4f87-93a9-aba45690e770. Do not modify this user recipe. Create test household for user Short import. Source-photo acquisition is real (no runtime mocks); fixture unit tests may stub network edge cases. LLM import latency pre-existing, use direct backend for slow integration tests if external request times out."

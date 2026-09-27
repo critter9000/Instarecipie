@@ -3,11 +3,9 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -20,7 +18,7 @@ import {
 import dayjs from "dayjs";
 
 import { useAddMeal, useDeleteMeal, useMealPlan, useRecipes } from "@/src/api";
-import { RECIPE_PLACEHOLDER } from "@/src/assets";
+import SourcePhoto from "@/src/components/SourcePhoto";
 import EmptyState from "@/src/components/EmptyState";
 import { useToast } from "@/src/components/Toast";
 import { useHouseholdCtx } from "@/src/household-context";
@@ -139,10 +137,13 @@ export default function Planner() {
                     onPress={() => router.push(`/recipe/${e.recipe_id}`)}
                     style={styles.filledSlot}
                   >
-                    <Image
-                      source={{ uri: e.recipe_image || RECIPE_PLACEHOLDER }}
+                    <SourcePhoto
+                      testID={`plan-photo-${e.id}`}
+                      uri={recipes?.some((recipe) => recipe.id === e.recipe_id) ? recipes.find((recipe) => recipe.id === e.recipe_id)?.image_url : e.recipe_image}
+                      status={recipes?.find((recipe) => recipe.id === e.recipe_id)?.image_status}
+                      title={e.recipe_title}
+                      compact
                       style={styles.slotThumb}
-                      contentFit="cover"
                     />
                     <Text style={styles.slotTitle} numberOfLines={2}>{e.recipe_title}</Text>
                     <Pressable
@@ -191,10 +192,13 @@ export default function Planner() {
               onPress={() => addRecipeToPlan(item.id)}
               style={styles.pickRow}
             >
-              <Image
-                source={{ uri: item.image_url || RECIPE_PLACEHOLDER }}
+              <SourcePhoto
+                testID={`picker-photo-${item.id}`}
+                uri={item.image_url}
+                status={item.image_status}
+                title={item.title}
+                compact
                 style={styles.pickThumb}
-                contentFit="cover"
               />
               <View style={{ flex: 1 }}>
                 <Text style={styles.pickTitle} numberOfLines={2}>{item.title}</Text>

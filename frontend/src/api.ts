@@ -3,8 +3,15 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import Constants from "expo-constants";
 
-const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
+export const BACKEND_URL = (Constants.expoConfig?.extra?.backendUrl as string || process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
+const BASE = `${BACKEND_URL}/api`;
+
+export function photoUrl(uri?: string | null) {
+  if (!uri) return undefined;
+  return uri.startsWith("/api/") ? `${BACKEND_URL}${uri}` : uri;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,6 +24,10 @@ export type Recipe = {
   title: string;
   description: string;
   image_url: string | null;
+  image_status?: "pending" | "ready" | "unavailable" | "error";
+  image_source_url?: string | null;
+  image_width?: number;
+  image_height?: number;
   category: string;
   tags: string[];
   servings: number;
@@ -120,6 +131,7 @@ export function useRecipes(hid?: string, category = "All", q = "") {
       return req<Recipe[]>(`/households/${hid}/recipes?${params.toString()}`);
     },
     enabled: !!hid,
+    refetchInterval: (query) => query.state.data?.some((recipe) => recipe.image_status === "pending") ? 2000 : false,
   });
 }
 
@@ -128,6 +140,19 @@ export function useRecipe(rid?: string) {
     queryKey: ["recipe", rid],
     queryFn: () => req<Recipe>(`/recipes/${rid}`),
     enabled: !!rid,
+    refetchInterval: (query) => query.state.data?.image_status === "pending" ? 2000 : false,
+  });
+}
+
+export function useRefreshRecipePhoto(hid?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rid: string) => req<Recipe>(`/households/${hid}/recipes/${rid}/refresh-image`, { method: "POST" }),
+    onSuccess: (recipe) => {
+      qc.setQueryData(["recipe", recipe.id], recipe);
+      qc.invalidateQueries({ queryKey: ["recipes"] });
+      qc.invalidateQueries({ queryKey: ["mealplan"] });
+    },
   });
 }
 

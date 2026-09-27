@@ -1,11 +1,10 @@
 import React from "react";
 import { Pressable, Text, View } from "react-native";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Icon from "@react-native-vector-icons/feather";
 
 import { Recipe } from "@/src/api";
-import { RECIPE_PLACEHOLDER } from "@/src/assets";
+import SourcePhoto from "@/src/components/SourcePhoto";
 import { fonts, makeStyles, radius, spacing } from "@/src/theme";
 
 export default function RecipeCard({
@@ -25,11 +24,12 @@ export default function RecipeCard({
       style={({ pressed }) => [styles.card, pressed && { transform: [{ scale: 0.98 }] }]}
     >
       <View style={styles.imageWrap}>
-        <Image
-          source={{ uri: recipe.image_url || RECIPE_PLACEHOLDER }}
+        <SourcePhoto
+          testID={`recipe-photo-${recipe.id}`}
+          uri={recipe.image_url}
+          status={recipe.image_status}
+          title={recipe.title}
           style={styles.image}
-          contentFit="cover"
-          transition={250}
         />
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{recipe.category}</Text>

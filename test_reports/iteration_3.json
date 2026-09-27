@@ -1,0 +1,54 @@
+{
+  "summary": "Targeted photo-fix regression testing completed for backend + Expo web mobile preview. Backend pytest passed 17/17 covering: real YouTube Short import (pending->ready), exact source thumbnail ownership, decodable managed JPEG endpoint, refresh-image pending->ready revision update, wrong household/deleted/manual refresh rejections, legacy repaired record invariants, and photo parser unit edge cases (watch query variants, shorts/youtu.be/embed/live, lookalike host rejection, maxres->hqdefault fallback, invalid bytes/tiny logo/private URL rejection, nested/reversed meta parsing). Frontend mobile checks validated onboarding kitchen creation, real Shorts import, detail-screen photo polling, refresh behavior, planner recipe picker photos, planner card photos, library card photos, grocery add action, servings scaler, manual no-source neutral fallback message/icon, and no horizontal overflow in tested screens.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "global",
+        "issues": [
+          "Console warnings still present: deprecated 'shadow*' props and props.pointerEvents usage."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_recipe_photo_flow.py",
+    "/app/backend/tests/test_recipe_photo_units.py",
+    "/app/test_reports/pytest/pytest_results_iteration3.xml",
+    "/app/test_reports/screenshots_iter3/recipe-detail-photo-ready.jpg",
+    "/app/test_reports/screenshots_iter3/planner-picker-success.jpg",
+    "/app/test_reports/screenshots_iter3/manual-fallback-verified.jpg"
+  ],
+  "action_items": [
+    "Optional cleanup: resolve deprecated web warnings for shadow*/pointerEvents.",
+    "Optional refactor: split backend/server.py (currently >700 lines) into focused routers/modules per code-review guideline.",
+    "Optional env hardening: backend/object_storage.py has fallback default for INTEGRATION_PROXY_URL; policy recommends fail-fast on missing env."
+  ],
+  "critical_code_review_comments": [
+    "photo_jobs.public_recipe correctly strips image_storage_path from API responses, preventing storage path leakage.",
+    "Refresh flow preserves previous verified image if refresh fails (good resilience behavior).",
+    "server.py is now 790 lines, exceeding recommended 700-line split threshold.",
+    "object_storage.py uses a default integration URL fallback; env-policy prefers no defaults for fail-fast configuration safety."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_recipe_photo_flow.py",
+    "/app/backend/tests/test_recipe_photo_units.py",
+    "/app/memory/test_credentials.md",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17)",
+    "frontend": "92%"
+  },
+  "seed_data_creation": "Created isolated TEST kitchens and recipes for this run. Key kitchen records added to /app/memory/test_credentials.md: S4N974 (photo import/refresh), BDATQ5 (planner picker/photo checks).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Use public preview URL from frontend/.env. For photo regression retest, reuse kitchen BDATQ5 (hid 6171f922-4d88-4d8b-985b-ea33dd962673) and recipe 40d776a6-cc6b-452b-80a5-88fbeb4480c2. Manual no-source fallback sample: recipe 27c9ea25-589f-46d1-ac11-a8d12d1a4e32.",
+  "rca_of_issue": "No functional regression found for requested photo ownership/pending-ready/refresh paths. Early UI automation failures were due to test selector strategy (role-based tab locator mismatch), not backend/frontend feature failure."
+}

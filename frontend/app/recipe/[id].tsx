@@ -5,11 +5,9 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
-import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { WebView } from "react-native-webview";
@@ -30,8 +28,9 @@ import {
   useDeleteRecipe,
   useGroceryFromRecipe,
   useRecipe,
+  useRefreshRecipePhoto,
 } from "@/src/api";
-import { RECIPE_PLACEHOLDER } from "@/src/assets";
+import SourcePhoto from "@/src/components/SourcePhoto";
 import { useToast } from "@/src/components/Toast";
 import { useHouseholdCtx } from "@/src/household-context";
 import { scaleQuantity } from "@/src/scale";
@@ -52,6 +51,7 @@ export default function RecipeDetail() {
   const addGrocery = useGroceryFromRecipe(householdId ?? undefined);
   const addMeal = useAddMeal(householdId ?? undefined);
   const deleteRecipe = useDeleteRecipe(householdId ?? undefined);
+  const refreshPhoto = useRefreshRecipePhoto(householdId ?? undefined);
 
   const [tab, setTab] = useState<"ingredients" | "steps">("ingredients");
   const [servings, setServings] = useState<number | null>(null);
@@ -78,6 +78,15 @@ export default function RecipeDetail() {
   const currentServings = servings ?? baseServings;
   const factor = currentServings / baseServings;
   const totalCalories = Math.round(recipe.calories * currentServings);
+
+  const handleRefreshPhoto = async () => {
+    try {
+      await refreshPhoto.mutateAsync(recipe.id);
+      toast("Looking for the original photo…", "info");
+    } catch (e: any) {
+      toast(e.message || "Could not refresh the photo", "error");
+    }
+  };
 
   const openVideo = async () => {
     const url = recipe.video_url || recipe.source_url;
@@ -139,11 +148,13 @@ export default function RecipeDetail() {
       >
         {/* Hero */}
         <View style={styles.heroWrap}>
-          <Image
-            source={{ uri: recipe.image_url || RECIPE_PLACEHOLDER }}
+          <SourcePhoto
+            testID="recipe-hero-photo"
+            uri={recipe.image_url}
+            status={recipe.image_status}
+            title={recipe.title}
             style={styles.hero}
-            contentFit="cover"
-            transition={250}
+            fit="contain"
           />
           <LinearGradient
             colors={["rgba(41,37,36,0.55)", "rgba(41,37,36,0)", "rgba(41,37,36,0.0)"]}
@@ -160,6 +171,20 @@ export default function RecipeDetail() {
         </View>
 
         <View style={styles.content}>
+          {!!recipe.source_url && (
+            <View style={styles.photoInfo}>
+              <Text testID="recipe-photo-status" style={styles.photoStatus}>
+                {recipe.image_status === "pending" ? "Finding the original photo…" : recipe.image_status === "ready" ? "Photo from the original source" : recipe.image_status === "error" ? "Photo couldn’t be saved. Try again." : "The source photo isn’t available yet"}
+              </Text>
+              <Pressable testID="refresh-recipe-photo" accessibilityRole="button" accessibilityLabel="Refresh original recipe photo"
+                disabled={refreshPhoto.isPending || recipe.image_status === "pending" || !householdId}
+                onPress={handleRefreshPhoto}
+                style={({ pressed }) => [styles.photoRefresh, { opacity: pressed || recipe.image_status === "pending" ? 0.5 : 1 }]}>
+                <Icon name="refresh-cw" size={16} color={colors.brandPrimary} />
+                <Text testID="refresh-recipe-photo-label" style={styles.photoRefreshText}>Refresh</Text>
+              </Pressable>
+            </View>
+          )}
           <View style={styles.catRow}>
             <View style={styles.catBadge}>
               <Text style={styles.catBadgeText}>{recipe.category}</Text>
@@ -383,6 +408,10 @@ const useStyles = makeStyles((colors) => ({
   center: { alignItems: "center", justifyContent: "center" },
   heroWrap: { width: "100%", height: 300 },
   hero: { width: "100%", height: "100%", backgroundColor: colors.surfaceTertiary },
+  photoInfo: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  photoStatus: { flex: 1, fontFamily: fonts.text.medium, fontSize: 12, lineHeight: 18, color: colors.muted },
+  photoRefresh: { minHeight: 44, paddingHorizontal: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  photoRefreshText: { fontFamily: fonts.text.semibold, fontSize: 12, color: colors.brandPrimary },
   scrimTop: { position: "absolute", top: 0, left: 0, right: 0, height: 140 },
   heroActions: {
     position: "absolute",

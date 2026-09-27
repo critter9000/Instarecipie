@@ -1,4 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Response
+from starlette.concurrency import run_in_threadpool
+import asyncio
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,7 +12,7 @@ import logging
 import requests
 import html as _html
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
@@ -18,6 +20,10 @@ from datetime import datetime, timezone
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+from object_storage import init_storage, get_image
+from photo_jobs import public_recipe, schedule_photo, repair_existing_photos, stop_photo_jobs
+from recipe_photos import PHOTO_VERSION
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -38,15 +44,6 @@ logging.basicConfig(level=logging.INFO)
 AISLES = ["Produce", "Dairy", "Meat & Seafood", "Pantry", "Bakery", "Frozen", "Beverages", "Spices", "Other"]
 CATEGORIES = ["Breakfast", "Lunch", "Dinner", "Dessert", "Vegan", "Vegetarian", "Quick", "Healthy", "Baking", "Snack", "Other"]
 MEMBER_COLORS = ["#C84C31", "#2A5A39", "#7D5513", "#3B3D36", "#8A311D", "#6B2313"]
-
-FOOD_PLACEHOLDERS = [
-    "https://images.unsplash.com/photo-1490645935967-10de6ba17061?crop=entropy&cs=srgb&fm=jpg&q=80&w=1200",
-    "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?crop=entropy&cs=srgb&fm=jpg&q=80&w=1200",
-    "https://images.unsplash.com/photo-1467003909585-2f8a72700288?crop=entropy&cs=srgb&fm=jpg&q=80&w=1200",
-    "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?crop=entropy&cs=srgb&fm=jpg&q=80&w=1200",
-    "https://images.unsplash.com/photo-1476224203421-9ac39bcb3327?crop=entropy&cs=srgb&fm=jpg&q=80&w=1200",
-]
-
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -106,6 +103,14 @@ class RecipeCreate(BaseModel):
     ingredients: List[Ingredient] = []
     steps: List[str] = []
     member_id: Optional[str] = None
+
+
+class RecipeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    household_id: str
+    title: str
+    image_url: Optional[str] = None
 
 
 class MealPlanCreate(BaseModel):
@@ -340,7 +345,7 @@ async def extract_recipe_via_llm(source: str) -> dict:
     from emergentintegrations.llm.chat import LlmChat, UserMessage
 
     is_url = bool(re.match(r'^https?://', source.strip(), re.I))
-    html_text = fetch_html(source) if is_url else None
+    html_text = await run_in_threadpool(fetch_html, source) if is_url else None
     jsonld = parse_jsonld_recipe(html_text)
     video_url = detect_video(html_text, source) if is_url else None
 
@@ -348,15 +353,13 @@ async def extract_recipe_via_llm(source: str) -> dict:
     # to get the REAL page content so we never guess the wrong dish.
     reader_text = None
     if is_url and not jsonld:
-        reader_text = fetch_reader(source)
+        reader_text = await run_in_threadpool(fetch_reader, source)
 
     # Authoritative, real recipe data from the page's structured schema.org markup.
     real = None
-    real_image = None
     real_calories = None
     real_servings = None
     if jsonld:
-        real_image = image_from_node(jsonld)
         real_calories = parse_calories(jsonld.get("nutrition"))
         real_servings = parse_servings(jsonld.get("recipeYield"))
         nutri = jsonld.get("nutrition") if isinstance(jsonld.get("nutrition"), dict) else {}
@@ -474,11 +477,10 @@ async def extract_recipe_via_llm(source: str) -> dict:
     data["ingredients"] = [i for i in clean_ings if i["name"]]
     data["steps"] = [str(s).strip() for s in (data.get("steps") or []) if str(s).strip()]
 
-    # Image: real page image first, never a random stock photo for a real URL if we have one.
-    image = real_image or meta_image(html_text) or image_from_markdown(reader_text) or data.get("image_url")
-    if not image:
-        image = random.choice(FOOD_PLACEHOLDERS)
-    data["image_url"] = image
+    # Photos are resolved independently from actual source metadata. Never accept
+    # a model-generated URL or the reader's first image (often a logo/webpage).
+    data["image_url"] = None
+    data["_image_html"] = html_text
     data["video_url"] = video_url
     data["has_real_source"] = bool(real and (real.get("ingredients") or real.get("instructions")))
     return data
@@ -540,6 +542,8 @@ async def _store_recipe(hid: str, data: dict, source_url: Optional[str], source_
         "title": data["title"],
         "description": data.get("description", ""),
         "image_url": data.get("image_url"),
+        "image_status": "pending" if source_url or data.get("image_url") else "unavailable",
+        "image_version": PHOTO_VERSION,
         "category": data.get("category", "Other"),
         "tags": data.get("tags", []),
         "servings": data.get("servings", 2),
@@ -561,10 +565,12 @@ async def _store_recipe(hid: str, data: dict, source_url: Optional[str], source_
     }
     await db.recipes.insert_one(doc)
     doc.pop("_id", None)
-    return doc
+    if doc["image_status"] == "pending":
+        schedule_photo(db, doc.copy(), data.get("_image_html"))
+    return public_recipe(doc)
 
 
-@api_router.post("/households/{hid}/recipes/import")
+@api_router.post("/households/{hid}/recipes/import", response_model=RecipeResponse)
 async def import_recipe(hid: str, payload: RecipeImport):
     if not await db.households.find_one({"id": hid}):
         raise HTTPException(status_code=404, detail="Household not found")
@@ -577,14 +583,14 @@ async def import_recipe(hid: str, payload: RecipeImport):
     return await _store_recipe(hid, data, payload.source if is_url else None, "link" if is_url else "text", payload.member_id)
 
 
-@api_router.post("/households/{hid}/recipes")
+@api_router.post("/households/{hid}/recipes", response_model=RecipeResponse)
 async def create_recipe(hid: str, payload: RecipeCreate):
     data = payload.dict()
     data["ingredients"] = [i if isinstance(i, dict) else i.dict() for i in payload.ingredients]
     return await _store_recipe(hid, data, None, "manual", payload.member_id)
 
 
-@api_router.get("/households/{hid}/recipes")
+@api_router.get("/households/{hid}/recipes", response_model=List[RecipeResponse])
 async def list_recipes(hid: str, category: Optional[str] = None, q: Optional[str] = None):
     query = {"household_id": hid, "deleted_at": None}
     if category and category != "All":
@@ -592,15 +598,41 @@ async def list_recipes(hid: str, category: Optional[str] = None, q: Optional[str
     if q:
         query["title"] = {"$regex": re.escape(q), "$options": "i"}
     docs = await db.recipes.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return docs
+    return [public_recipe(doc) for doc in docs]
 
 
-@api_router.get("/recipes/{rid}")
+@api_router.get("/recipes/{rid}", response_model=RecipeResponse)
 async def get_recipe(rid: str):
     doc = await db.recipes.find_one({"id": rid, "deleted_at": None}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    return doc
+    return public_recipe(doc)
+
+
+@api_router.post("/households/{hid}/recipes/{rid}/refresh-image", response_model=RecipeResponse)
+async def refresh_recipe_image(hid: str, rid: str):
+    doc = await db.recipes.find_one({"id": rid, "household_id": hid, "deleted_at": None}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    if not doc.get("source_url"):
+        raise HTTPException(status_code=400, detail="This recipe has no original source link")
+    await db.recipes.update_one({"id": rid}, {"$set": {"image_status": "pending"}})
+    doc["image_status"] = "pending"
+    schedule_photo(db, doc.copy())
+    return public_recipe(doc)
+
+
+@api_router.get("/households/{hid}/recipes/{rid}/image")
+async def recipe_image(hid: str, rid: str):
+    doc = await db.recipes.find_one({"id": rid, "household_id": hid, "deleted_at": None}, {"_id": 0, "image_storage_path": 1})
+    if not doc or not doc.get("image_storage_path"):
+        raise HTTPException(status_code=404, detail="Source photo unavailable")
+    try:
+        content, content_type = await run_in_threadpool(get_image, doc["image_storage_path"])
+    except Exception:
+        logger.exception("Stored photo could not be loaded")
+        raise HTTPException(status_code=503, detail="Photo temporarily unavailable")
+    return Response(content, media_type=content_type, headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"})
 
 
 @api_router.delete("/recipes/{rid}")
@@ -735,6 +767,23 @@ app.add_middleware(
 )
 
 
+_photo_migration = None
+
+
+@app.on_event("startup")
+async def start_photo_storage():
+    global _photo_migration
+    try:
+        await run_in_threadpool(init_storage)
+    except Exception:
+        logger.exception("Photo storage initialization failed; recipes remain available")
+    _photo_migration = asyncio.create_task(repair_existing_photos(db))
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    if _photo_migration:
+        _photo_migration.cancel()
+        await asyncio.gather(_photo_migration, return_exceptions=True)
+    await stop_photo_jobs()
     client.close()
